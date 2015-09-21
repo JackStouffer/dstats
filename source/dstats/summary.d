@@ -1204,3 +1204,109 @@ unittest {
         assert(approxEqual(z[i], (arr[i] - m) / sd));
     }
 }
+
+/**
+Function to compute the quantile of a $(D SortedRange) given $(D q), which
+is a number between 0 and 1. The range MUST be a $(D SortedRange) that is sorted
+in ascending order. Otherwise this function will give incorrect results. If the
+range is empty, this function will return $(D real.nan). Is
+$(BIGOH r.length * q) for forward ranges and $(BIGOH 1) for random access ranges.
+
+Params:
+    r = a forward range with length
+    q = where to calculate the quantile, must be $(D q > 0 && q < 1)
+
+Returns:
+    the quantile of r given q
+*/
+real quantile(R)(R r, real q)
+    if (isInstanceOf!(SortedRange, R) &&
+        is(ElementType!R : real) &&
+        isForwardRange!R &&
+        hasLength!R &&
+        !isInfinite!R)
+in
+{
+    assert(q > 0 && q < 1);
+}
+body
+{
+    import std.math : modf, approxEqual;
+
+    if (r.empty)
+    {
+        return real.nan;
+    }
+    
+    if (r.length == 1)
+    {
+        return r.front;
+    }
+
+    real x = r.length * q;
+    real j;
+    real g = modf(x, j);
+    size_t j_int = cast(size_t) j;
+
+    static if (isRandomAccessRange!R)
+    {
+        if (g.approxEqual(0))
+        {
+            return (r[j_int - 1] + r[j_int]) / 2.0;
+        }
+        else
+        {
+            return r[j_int];
+        }
+    }
+    else
+    {
+        if (g.approxEqual(0))
+        {
+            Unqual!(ElementType!R) prev_item;
+
+            r = r.drop(j_int - 1);
+            prev_item = r.front;
+            r.popFront;
+            return (r.front + prev_item) / 2.0;
+        }
+        else
+        {
+            return r.drop(j_int).front;
+        }
+    }
+
+    assert(0);
+}
+
+///
+unittest
+{
+    import std.algorithm.sorting : sort;
+    import std.range : assumeSorted;
+    import std.math : isNaN;
+    import std.stdio;
+
+    assert([1, 2, 3, 4].assumeSorted.quantile(0.25) == 1.5);
+    assert([1, 2, 3, 4].assumeSorted.quantile(0.5) == 2.5);
+    assert([1, 2, 3, 4].assumeSorted.quantile(0.75) == 3.5);
+
+    [1.3, 2.2, 2.7, 3.1, 3.3, 3.7].assumeSorted.quantile(0.25).writeln;
+
+    assert(sort([48, 31, 1, 37, 89, 83, 71]).quantile(0.5) == 48);
+
+    assert([1, 2][0 .. 0].assumeSorted.quantile(0.25).isNaN);
+    assert([1].assumeSorted.quantile(0.25) == 1);
+}
+
+@safe nothrow unittest
+{
+    import std.internal.test.dummyrange;
+    import std.range : assumeSorted;
+    import std.math : approxEqual;
+
+    DummyRange!(ReturnBy.Value, Length.Yes, RangeType.Forward) r;
+    assert(r.assumeSorted.quantile(0.25) == 3);
+    assert(r.assumeSorted.quantile(0.5).approxEqual(5.5));
+    assert(r.assumeSorted.quantile(0.75) == 8);
+}
