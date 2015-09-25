@@ -1205,108 +1205,159 @@ unittest {
     }
 }
 
+enum QuantileType {
+    Type1,
+    Type2,
+    Type3,
+    Type4,
+    Type5,
+    Type6,
+    Type7,
+    Type8,
+    Type9
+};
+
 /**
-Function to compute the quantile of a $(D SortedRange) given $(D q), which
-is a number between 0 and 1. The range MUST be a $(D SortedRange) that is sorted
-in ascending order. Otherwise this function will give incorrect results. If the
-range is empty, this function will return $(D real.nan). Is
-$(BIGOH r.length * q) for forward ranges and $(BIGOH 1) for random access ranges.
+    Function to compute the quantile of a $(D SortedRange) given $(D p), which
+    is a number between 0 and 1. The range MUST be a $(D SortedRange) that is sorted
+    in ascending order. Otherwise this function will give incorrect results. If the
+    range is empty, this function will return $(D real.nan). Is
+    $(BIGOH r.length * p) for forward ranges and $(BIGOH 1) for random access ranges.
 
-Params:
-    r = a forward range with length
-    q = where to calculate the quantile, must be $(D q > 0 && q < 1)
+    Formula:
+        The quantile of a range x is found with quantile(p) = (1 - y) * x[j] + y * x[j + 1].
+        Where y is a function of the constants j and g, depending on the type.
 
-Returns:
-    the quantile of r given q
+    Params:
+        r = a forward range with length
+        p = where to calculate the quantile, must be $(D p >= 0 && p <= 1)
+
+    Returns:
+        the quantile of r given p
 */
-real quantile(R)(R r, real q)
+real quantile(QuantileType type = QuantileType.Type7, R)(R r, real p)
     if (isInstanceOf!(SortedRange, R) &&
         is(ElementType!R : real) &&
-        isForwardRange!R &&
+        isRandomAccessRange!R &&
         hasLength!R &&
         !isInfinite!R)
 in
 {
-    assert(q > 0 && q < 1);
+    assert(p >= 0 && p <= 1);
+    assert(!r.empty, "The range cannot be empty");
 }
 body
 {
-    import std.math : modf, approxEqual;
+    import std.math : floor, approxEqual;
 
-    if (r.empty)
+    if (p == 0)
     {
-        return real.nan;
-    }
-    
-    if (r.length == 1)
-    {
-        return r.front;
+        return r[0]; 
     }
 
-    real x = r.length * q;
-    real j;
-    real g = modf(x, j);
-    size_t j_int = cast(size_t) j;
-
-    static if (isRandomAccessRange!R)
+    if (p == 1)
     {
+        return r[$];
+    }
+
+    // Q(p) = (1 - y) * x[j] + y * x[j + 1]
+    // y is a function of j = floor(np + m)
+    // and g = np + m - j
+    auto n = r.length;
+    real m;
+    real g;
+    size_t j;
+    real y;
+
+    static if (type == QuantileType.Type1)
+    {
+        // y = 0 if g = 0, else y = 1
+        m = 0;
+        j = cast(size_t) floor((n * p) + m);
+        g = (n * p) + m - j;
+
         if (g.approxEqual(0))
         {
-            return (r[j_int - 1] + r[j_int]) / 2.0;
+            y = 0;
         }
         else
         {
-            return r[j_int];
+            y = 1;
         }
     }
-    else
+    else static if (type == QuantileType.Type2)
     {
+        // y = 0.5 if g = 0, else y = 12
+        m = 0;
+        j = cast(size_t) floor((n * p) + m);
+        g = (n * p) + m - j;
+
         if (g.approxEqual(0))
         {
-            Unqual!(ElementType!R) prev_item;
-
-            r = r.drop(j_int - 1);
-            prev_item = r.front;
-            r.popFront;
-            return (r.front + prev_item) / 2.0;
+            y = 0.5;
         }
         else
         {
-            return r.drop(j_int).front;
+            y = 1;
+        }
+    }
+    else static if (type == QuantileType.Type3)
+    {
+        // y = 0 if g = 0 and j is even, else y = 1
+        m = -1.0 / 2.0;
+        j = cast(size_t) floor((n * p) + m);
+        g = (n * p) + m - j;
+
+        if (g.approxEqual(0) && j % 2 == 0)
+        {
+            y = 0;
+        }
+        else
+        {
+            y = 1;
         }
     }
 
-    assert(0);
+    size_t index = j - 1 == size_t.max ? 0 : j - 1;
+
+    return ((1 - y) * r[index]) + (y * r[j]);
 }
 
-///
+// Type 1
 unittest
 {
-    import std.algorithm.sorting : sort;
     import std.range : assumeSorted;
-    import std.math : isNaN;
-    import std.stdio;
 
-    assert([1, 2, 3, 4].assumeSorted.quantile(0.25) == 1.5);
-    assert([1, 2, 3, 4].assumeSorted.quantile(0.5) == 2.5);
-    assert([1, 2, 3, 4].assumeSorted.quantile(0.75) == 3.5);
+    enum data = [10, 20, 30, 40, 50].assumeSorted;
 
-    [1.3, 2.2, 2.7, 3.1, 3.3, 3.7].assumeSorted.quantile(0.25).writeln;
-
-    assert(sort([48, 31, 1, 37, 89, 83, 71]).quantile(0.5) == 48);
-
-    assert([1, 2][0 .. 0].assumeSorted.quantile(0.25).isNaN);
-    assert([1].assumeSorted.quantile(0.25) == 1);
+    assert(data.quantile!(QuantileType.Type1)(0.2) == 10);
+    assert(data.quantile!(QuantileType.Type1)(0.25) == 20);
+    assert(data.quantile!(QuantileType.Type1)(0.5) == 30);
+    assert(data.quantile!(QuantileType.Type1)(0.75) == 40);
 }
 
-@safe nothrow unittest
+// Type 2
+unittest
 {
-    import std.internal.test.dummyrange;
     import std.range : assumeSorted;
-    import std.math : approxEqual;
 
-    DummyRange!(ReturnBy.Value, Length.Yes, RangeType.Forward) r;
-    assert(r.assumeSorted.quantile(0.25) == 3);
-    assert(r.assumeSorted.quantile(0.5).approxEqual(5.5));
-    assert(r.assumeSorted.quantile(0.75) == 8);
+    enum data = [10, 20, 30, 40, 50].assumeSorted;
+
+    assert(data.quantile!(QuantileType.Type2)(0.2) == 15);
+    assert(data.quantile!(QuantileType.Type2)(0.25) == 20);
+    assert(data.quantile!(QuantileType.Type2)(0.5) == 30);
+    assert(data.quantile!(QuantileType.Type2)(0.75) == 40);
+}
+
+// Type 3
+unittest
+{
+    import std.range : assumeSorted;
+
+    enum data = [10, 20, 30, 40, 50].assumeSorted;
+
+    assert(data.quantile!(QuantileType.Type3)(0.2) == 10);
+    assert(data.quantile!(QuantileType.Type3)(0.25) == 10);
+    assert(data.quantile!(QuantileType.Type3)(0.5) == 20);
+    assert(data.quantile!(QuantileType.Type3)(0.75) == 40);
 }
